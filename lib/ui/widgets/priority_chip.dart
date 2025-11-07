@@ -14,12 +14,20 @@ class PriorityChip extends StatelessWidget {
   }
 
   String _label() {
-    switch (value) {
+    // Use the static helper
+    return PriorityChip.getLabel(value);
+  }
+
+  // --- NEW STATIC HELPER ---
+  /// Gets a display-friendly label for a [Priority].
+  static String getLabel(Priority p) {
+    switch (p) {
       case Priority.important: return 'Important';
       case Priority.rightNow: return 'Right Now';
       case Priority.delay: return 'Delay';
     }
   }
+  // --- END NEW HELPER ---
 
   @override
   Widget build(BuildContext context) {

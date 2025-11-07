@@ -20,35 +20,167 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   int _tab = 0;
 
+  // --- STATE FOR SEARCH & FILTER ---
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  Priority? _selectedPriority;
+  // --- END STATE ---
+
   @override
   void initState() {
     super.initState();
+    // Service calls
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ref.read(cleanupProvider).purgeOldTrash();
       await ref.read(reminderProvider).showDueRemindersOnOpen(context);
       if (mounted) setState(() {});
     });
+
+    // Listener for search text
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Builds the search and filter bar UI.
+  Widget _buildFilterBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      child: Row(
+        children: [
+          // Search Field
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search by title...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                // Clear button
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                  icon: const Icon(Icons.clear, size: 20),
+                  onPressed: () {
+                    _searchController.clear();
+                    // Listener will update _searchQuery
+                  },
+                )
+                    : null,
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Priority Filter Button
+          PopupMenuButton<Priority?>(
+            icon: Icon(
+              Icons.filter_list,
+              // Highlight icon if filter is active
+              color: _selectedPriority == null
+                  ? Theme.of(context).iconTheme.color
+                  : Theme.of(context).colorScheme.primary,
+            ),
+            tooltip: 'Filter by Priority',
+            onSelected: (Priority? priority) {
+              setState(() {
+                _selectedPriority = priority;
+              });
+            },
+            itemBuilder: (context) => [
+              // "All" option
+              const PopupMenuItem(
+                value: null,
+                child: Text('All Priorities'),
+              ),
+              const PopupMenuDivider(),
+              // One item for each priority
+              ...Priority.values.map((p) => PopupMenuItem(
+                value: p,
+                child: Text(PriorityChip.getLabel(p)), // Use helper
+              )),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(todoRepoProvider);
-    final items =
-    _tab == 0 ? repo.getAllActive().toList() : repo.getAllTrashed().toList();
+
+    // --- UPDATED DATA FETCHING ---
+    // Use the new repository method with current filters
+    final items = repo.getFilteredTodos(
+      active: _tab == 0,
+      query: _searchQuery,
+      priority: _selectedPriority,
+    ).toList();
+    // --- END UPDATE ---
 
     return Scaffold(
       appBar: AppBar(title: const Text('Melinoe')),
-      body: items.isEmpty
-          ? Center(
-        child: Text(_tab == 0 ? 'No ToDos yet.' : 'Trash is empty.'),
-      )
-          : ListView.builder(
-        itemCount: items.length,
-        itemBuilder: (ctx, i) => _TodoTile(item: items[i], trashed: _tab == 1),
+      // --- BODY IS NOW A COLUMN ---
+      body: Column(
+        children: [
+          // 1. The new filter bar
+          _buildFilterBar(),
+
+          // 2. The list, inside an Expanded
+          Expanded(
+            child: items.isEmpty
+                ? Center(
+              // Show a more helpful empty message
+              child: Text(_searchQuery.isNotEmpty || _selectedPriority != null
+                  ? 'No results found.'
+                  : (_tab == 0 ? 'No ToDos yet.' : 'Trash is empty.')),
+            )
+                : ListView.builder(
+              itemCount: items.length,
+              // Note: _TodoTile is unchanged, so we just pass data
+              itemBuilder: (ctx, i) => _TodoTile(item: items[i], trashed: _tab == 1),
+            ),
+          ),
+        ],
       ),
+      // --- END BODY UPDATE ---
+
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) => setState(() {
+          // --- RESET FILTERS ON TAB CHANGE ---
+          _tab = i;
+          _searchController.clear();
+          _selectedPriority = null;
+          // The listener will set _searchQuery
+        }),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.checklist), label: 'Active'),
           NavigationDestination(icon: Icon(Icons.delete), label: 'Trash'),
@@ -59,7 +191,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const EditTodoPage()),
-        ).then((_) => setState(() {})),
+        ).then((_) => setState(() {})), // Refresh list on return
         child: const Icon(Icons.add),
       )
           : null,
@@ -67,6 +199,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 }
 
+// --- _TodoTile is unchanged, no edits needed here ---
 class _TodoTile extends ConsumerWidget {
   final Todo item;
   final bool trashed;

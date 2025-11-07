@@ -44,6 +44,32 @@ class TodoRepository {
       _box.values.where((t) => t.deletedAt != null).toList()
         ..sort((a, b) => (b.deletedAt ?? DateTime(0)).compareTo(a.deletedAt ?? DateTime(0)));
 
+  // --- NEW METHOD ---
+  /// Gets active or trashed todos, with optional search query and priority filter.
+  Iterable<Todo> getFilteredTodos({
+    required bool active,
+    String query = '',
+    Priority? priority,
+  }) {
+    // 1. Get base list (already sorted)
+    final baseList = active ? getAllActive() : getAllTrashed();
+
+    // 2. Apply title filter
+    var filtered = baseList;
+    if (query.trim().isNotEmpty) {
+      filtered = filtered.where((t) => t.title.toLowerCase().contains(query.trim().toLowerCase()));
+    }
+
+    // 3. Apply priority filter
+    if (priority != null) {
+      filtered = filtered.where((t) => t.priority == priority);
+    }
+
+    return filtered;
+  }
+  // --- END NEW METHOD ---
+
+
   Future<Todo> create({
     required String title,
     required String description,
