@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart'; // Import for debugPrint
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -44,8 +45,6 @@ class TodoRepository {
       _box.values.where((t) => t.deletedAt != null).toList()
         ..sort((a, b) => (b.deletedAt ?? DateTime(0)).compareTo(a.deletedAt ?? DateTime(0)));
 
-  // --- NEW METHOD ---
-  /// Gets active or trashed todos, with optional search query and priority filter.
   Iterable<Todo> getFilteredTodos({
     required bool active,
     String query = '',
@@ -67,7 +66,6 @@ class TodoRepository {
 
     return filtered;
   }
-  // --- END NEW METHOD ---
 
 
   Future<Todo> create({
@@ -124,6 +122,32 @@ class TodoRepository {
       }
     }
   }
+
+  // --- NEW METHOD ---
+  /// Permanently deletes all items from the trash.
+  Future<void> purgeAllTrash() async {
+    // Find all trashed items
+    final toDelete = _box.values.where((t) => t.deletedAt != null).toList();
+
+    for (final t in toDelete) {
+      // 1. Delete from Hive box
+      await _box.delete(t.id);
+
+      // 2. Delete associated image file, if it exists
+      if (t.imagePath != null) {
+        try {
+          final f = File(t.imagePath!);
+          if (await f.exists()) {
+            await f.delete();
+          }
+        } catch (e) {
+          // Log error but don't stop the loop
+          debugPrint('Failed to delete image ${t.imagePath}: $e');
+        }
+      }
+    }
+  }
+  // --- END NEW METHOD ---
 
   List<Todo> dueReminders(DateTime now) => _box.values.where((t) =>
   t.deletedAt == null && t.reminderAt != null && !t.reminderAck && !t.reminderAt!.isAfter(now)

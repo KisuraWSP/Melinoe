@@ -20,11 +20,9 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   int _tab = 0;
 
-  // --- STATE FOR SEARCH & FILTER ---
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   Priority? _selectedPriority;
-  // --- END STATE ---
 
   @override
   void initState() {
@@ -32,8 +30,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     // Service calls
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ref.read(cleanupProvider).purgeOldTrash();
-      await ref.read(reminderProvider).showDueRemindersOnOpen(context);
-      if (mounted) setState(() {});
+      // Added mounted check for safety
+      if (mounted) {
+        await ref.read(reminderProvider).showDueRemindersOnOpen(context);
+        setState(() {});
+      }
     });
 
     // Listener for search text
@@ -69,7 +70,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                   icon: const Icon(Icons.clear, size: 20),
                   onPressed: () {
                     _searchController.clear();
-                    // Listener will update _searchQuery
                   },
                 )
                     : null,
@@ -102,7 +102,6 @@ class _HomePageState extends ConsumerState<HomePage> {
           PopupMenuButton<Priority?>(
             icon: Icon(
               Icons.filter_list,
-              // Highlight icon if filter is active
               color: _selectedPriority == null
                   ? Theme.of(context).iconTheme.color
                   : Theme.of(context).colorScheme.primary,
@@ -114,16 +113,14 @@ class _HomePageState extends ConsumerState<HomePage> {
               });
             },
             itemBuilder: (context) => [
-              // "All" option
               const PopupMenuItem(
                 value: null,
                 child: Text('All Priorities'),
               ),
               const PopupMenuDivider(),
-              // One item for each priority
               ...Priority.values.map((p) => PopupMenuItem(
                 value: p,
-                child: Text(PriorityChip.getLabel(p)), // Use helper
+                child: Text(PriorityChip.getLabel(p)),
               )),
             ],
           ),
@@ -132,54 +129,91 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  // --- NEW DIALOG METHOD ---
+  /// Shows a confirmation dialog before emptying the trash.
+  Future<void> _confirmEmptyTrash(BuildContext context, TodoRepository repo) async {
+    // Don't show dialog if context is invalid
+    if (!context.mounted) return;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Empty Trash?'),
+        content: const Text('This will permanently delete all items in the trash. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false), // Dismiss, return false
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true), // Confirm, return true
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Delete All'),
+          ),
+        ],
+      ),
+    );
+
+    // Only proceed if the user confirmed and widget is still mounted
+    if (confirmed == true && mounted) {
+      await repo.purgeAllTrash();
+      setState(() {}); // Refresh the list
+    }
+  }
+  // --- END NEW DIALOG METHOD ---
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(todoRepoProvider);
 
-    // --- UPDATED DATA FETCHING ---
-    // Use the new repository method with current filters
     final items = repo.getFilteredTodos(
       active: _tab == 0,
       query: _searchQuery,
       priority: _selectedPriority,
     ).toList();
-    // --- END UPDATE ---
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Melinoe')),
-      // --- BODY IS NOW A COLUMN ---
+      appBar: AppBar(
+        title: const Text('Melinoe'),
+        // --- ADD APP BAR ACTIONS ---
+        actions: [
+          // Only show if on Trash tab AND trash is not empty
+          if (_tab == 1 && items.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined), //
+              tooltip: 'Empty Trash',
+              onPressed: () => _confirmEmptyTrash(context, repo),
+            ),
+        ],
+        // --- END APP BAR ACTIONS ---
+      ),
       body: Column(
         children: [
-          // 1. The new filter bar
           _buildFilterBar(),
-
-          // 2. The list, inside an Expanded
           Expanded(
             child: items.isEmpty
                 ? Center(
-              // Show a more helpful empty message
               child: Text(_searchQuery.isNotEmpty || _selectedPriority != null
                   ? 'No results found.'
                   : (_tab == 0 ? 'No ToDos yet.' : 'Trash is empty.')),
             )
                 : ListView.builder(
               itemCount: items.length,
-              // Note: _TodoTile is unchanged, so we just pass data
               itemBuilder: (ctx, i) => _TodoTile(item: items[i], trashed: _tab == 1),
             ),
           ),
         ],
       ),
-      // --- END BODY UPDATE ---
 
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() {
-          // --- RESET FILTERS ON TAB CHANGE ---
           _tab = i;
           _searchController.clear();
           _selectedPriority = null;
-          // The listener will set _searchQuery
         }),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.checklist), label: 'Active'),
@@ -191,7 +225,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const EditTodoPage()),
-        ).then((_) => setState(() {})), // Refresh list on return
+        ).then((_) => setState(() {})),
         child: const Icon(Icons.add),
       )
           : null,
@@ -199,7 +233,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 }
 
-// --- _TodoTile is unchanged, no edits needed here ---
+// --- _TodoTile (unchanged from your file, but included for completeness) ---
 class _TodoTile extends ConsumerWidget {
   final Todo item;
   final bool trashed;
@@ -227,6 +261,7 @@ class _TodoTile extends ConsumerWidget {
         },
         trailing: PopupMenuButton<String>(
           onSelected: (val) async {
+            bool shouldRefresh = true;
             switch (val) {
               case 'edit':
                 await Navigator.push(
@@ -240,13 +275,16 @@ class _TodoTile extends ConsumerWidget {
               case 'restore':
                 await repo.restore(item.id);
                 break;
-              case 'purge':
-                await repo.purgeExpiredTrash(grace: Duration.zero);
-                break;
+            // I've removed the ambiguous 'purge' from the individual item
+            // to avoid confusion with the new "Empty Trash" button.
             }
-            // Return to list and refresh
-            // ignore: use_build_context_synchronously
-            Navigator.popUntil(context, (route) => route.isFirst);
+            if (shouldRefresh) {
+              // This will force the widget to rebuild and get fresh data
+              // A simple setState in the homepage would also work, but
+              // since this is a ConsumerWidget, we can just re-read.
+              (context as Element).reassemble(); // A bit of a hack, let's refresh
+              ref.refresh(todoRepoProvider);
+            }
           },
           itemBuilder: (ctx) => [
             if (!trashed)
@@ -255,8 +293,6 @@ class _TodoTile extends ConsumerWidget {
               const PopupMenuItem(value: 'delete', child: Text('Move to Trash')),
             if (trashed)
               const PopupMenuItem(value: 'restore', child: Text('Restore')),
-            if (trashed)
-              const PopupMenuItem(value: 'purge', child: Text('Purge Trash Now')),
           ],
         ),
       ),
